@@ -246,7 +246,7 @@ config = {
 
 Разработчик - [@rokoss21](https://github.com/rokoss21)
 
-Ссылка на проект: [https://github.com/yourusername/iop-cli](https://github.com/yourusername/iop-cli)
+Ссылка на проект: [[https://github.com/yourusername/iop-cli](https://github.com/yourusername/iop-cli)](https://github.com/rokoss21/iop)
 
 ---
 
