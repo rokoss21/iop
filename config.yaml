@@ -1,0 +1,20 @@
+# OpenRouter API configuration
+api: openrouter
+openrouter_api_key: ${OPENROUTER_API_KEY}
+your_app_name: "IOP CLI"
+
+# Model configuration
+model: openai/gpt-4o  # Можно изменить на любую модель OpenRouter
+temperature: 0.7
+max_tokens: 2000
+
+# Application settings
+safety: true
+modify: true
+suggested_command_color: cyan
+
+# Formatting settings
+output_indent: 2
+user_message_color: green
+assistant_message_color: blue
+error_message_color: red
