@@ -11,10 +11,6 @@ max_tokens: 2000
 # Application settings
 safety: true
 modify: true
-suggested_command_color: cyan
 
 # Formatting settings
 output_indent: 2
-user_message_color: green
-assistant_message_color: blue
-error_message_color: red
