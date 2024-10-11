@@ -4,36 +4,69 @@ import os
 import platform
 import sys
 import subprocess
-import dotenv 
-import distro
-import yaml
-import pyperclip
 import requests
-from termcolor import colored
-from colorama import init
+import yaml
+import logging
+import argparse
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import Progress
+from rich.syntax import Syntax
+
+# Инициализация Rich Console
+console = Console()
+
+# Определение типа терминала
+IS_CMD = os.environ.get('TERM') == 'xterm' or 'cmd' in os.environ.get('COMSPEC', '').lower()
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def safe_print(*args, **kwargs):
+    console.print(*args, **kwargs)
+    if IS_CMD:
+        console.print()  # Добавляем дополнительную пустую строку для CMD
+
+def reset_console():
+    if platform.system() == "Windows":
+        os.system("color")
+    else:
+        print("\033[0m", end="", flush=True)
 
 def validate_api_key(api_key):
     headers = {
         "Authorization": f"Bearer {api_key}",
     }
     try:
-        response = requests.get("https://openrouter.ai/api/v1/auth/key", headers=headers)
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Проверка API ключа...", total=100)
+            response = requests.get("https://openrouter.ai/api/v1/auth/key", headers=headers)
+            progress.update(task, completed=100)
         return response.status_code == 200
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as e:
+        console.print(Panel(f"[bold red]Ошибка при валидации API ключа:[/bold red] {e}", title="Ошибка", border_style="red"))
         return False
 
 def get_api_key():
     while True:
-        api_key = input("Введите ваш API ключ OpenRouter: ")
+        api_key = console.input("[bold cyan]Введите ваш API ключ OpenRouter:[/bold cyan] ")
         if validate_api_key(api_key):
             return api_key
-        print(colored("Неверный API ключ. Пожалуйста, попробуйте снова.", 'red'))
+        console.print("[bold yellow]Неверный API ключ. Пожалуйста, попробуйте снова.[/bold yellow]")
 
 def update_env_file(api_key):
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    with open(env_path, "w") as env_file:
-        env_file.write(f"OPENROUTER_API_KEY={api_key}")
-    os.chmod(env_path, 0o600)  # Устанавливаем права доступа только для владельца
+    if not os.path.exists(env_path):
+        with open(env_path, "w") as env_file:
+            env_file.write(f"OPENROUTER_API_KEY={api_key}")
+        os.chmod(env_path, 0o600)  # Устанавливаем права доступа только для владельца
+    else:
+        console.print("[bold yellow]Файл .env уже существует. Перезаписать?[/bold yellow]")
+        if console.input("[bold cyan]Введите Y для перезаписи:[/bold cyan] ").strip().lower() == "y":
+            with open(env_path, "w") as env_file:
+                env_file.write(f"OPENROUTER_API_KEY={api_key}")
+            os.chmod(env_path, 0o600)  # Обновляем права доступа только для владельца
 
 def read_config():
     config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
@@ -42,16 +75,17 @@ def read_config():
     
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.exists(env_path):
-        print(colored("Файл .env не найден. Пожалуйста, введите API ключ OpenRouter.", 'yellow'))
+        console.print(Panel("[bold yellow]Файл .env не найден. Пожалуйста, введите API ключ OpenRouter.[/bold yellow]", title="Внимание", border_style="yellow"))
         api_key = get_api_key()
         update_env_file(api_key)
     else:
+        import dotenv
         dotenv.load_dotenv(env_path)
     
     config['openrouter_api_key'] = os.getenv('OPENROUTER_API_KEY')
     
     if not config['openrouter_api_key']:
-        print(colored("API ключ OpenRouter не найден. Пожалуйста, введите его.", 'yellow'))
+        console.print(Panel("[bold yellow]API ключ OpenRouter не найден. Пожалуйста, введите его.[/bold yellow]", title="Внимание", border_style="yellow"))
         api_key = get_api_key()
         update_env_file(api_key)
         config['openrouter_api_key'] = api_key
@@ -60,7 +94,7 @@ def read_config():
 
 def get_system_prompt(shell, is_script=False):
     prompt_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt.txt")
-    with open(prompt_file, "r") as file:
+    with open(prompt_file, "r", encoding="utf-8") as file:
         system_prompt = file.read()
     
     system_prompt = system_prompt.replace("{shell}", shell)
@@ -77,27 +111,33 @@ def get_system_prompt(shell, is_script=False):
     return system_prompt
 
 def ensure_prompt_is_question(prompt):
+    if not prompt.strip():
+        raise ValueError("Запрос не должен быть пустым.")
     if prompt[-1:] not in ["?", "."]:
         prompt += "?"
     return prompt
 
 def print_usage(config):
-    print(colored("Разработчик @rokoss21, версия 1.0", 'cyan'))
-    print()
-    print(colored("Использование: iop [-a] [-k] <ваш вопрос или команда>", 'yellow'))
-    print(colored("Аргументы:", 'yellow'))
-    print(colored("  -a: Запрашивать подтверждение перед выполнением команды (полезно только когда безопасность отключена)", 'yellow'))
-    print(colored("  -k: Изменить API ключ OpenRouter", 'yellow'))
-    print()
+    console.print(Panel("[bold cyan]Разработчик @rokoss21, версия 1.0[/bold cyan]", border_style="cyan"))
+    console.print()
+    console.print("[bold]Использование:[/bold] iop [-a] [-k] <ваш вопрос или команда>")
+    console.print("[bold]Аргументы:[/bold]")
+    console.print("  [cyan]-a, --ask:[/cyan] Запрашивать подтверждение перед выполнением команды")
+    console.print("  [cyan]-k, --key:[/cyan] Изменить API ключ OpenRouter")
+    console.print()
 
-    print(colored("Текущая конфигурация:", 'cyan'))
+    table = Table(title="Текущая конфигурация")
+    table.add_column("Параметр", style="cyan")
+    table.add_column("Значение", style="magenta")
     for key, value in config.items():
         if key != 'openrouter_api_key':
-            print(colored(f"* {key.capitalize():13}: {value}", 'cyan'))
+            table.add_row(key.capitalize(), str(value))
+    console.print(table)
 
 def get_os_friendly_name():
     os_name = platform.system()
     if os_name == "Linux":
+        import distro
         return f"Linux/{distro.name(pretty=True)}"
     elif os_name == "Windows":
         return os_name
@@ -108,7 +148,7 @@ def get_os_friendly_name():
 
 def chat_completion(config, query, shell, is_script=False):
     if not query:
-        print(colored("Не указан запрос пользователя.", config['error_message_color']))
+        console.print(Panel("[bold red]Не указан запрос пользователя.[/bold red]", title="Ошибка", border_style="red"))
         sys.exit(-1)
     
     system_prompt = get_system_prompt(shell, is_script)
@@ -129,46 +169,50 @@ def chat_completion(config, query, shell, is_script=False):
     }
     
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=data
-        )
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Отправка запроса...", total=100)
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=data
+            )
+            progress.update(task, completed=100)
         response.raise_for_status()
         return response.json()['choices'][0]['message']['content']
     except requests.exceptions.RequestException as e:
-        print(colored(f"Ошибка: {e}", config['error_message_color']))
+        console.print(Panel(f"[bold red]Ошибка при выполнении запроса:[/bold red] {e}", title="Ошибка", border_style="red"))
         sys.exit(-1)
 
-def check_for_issue(response, config):
+def check_for_issue(response):
     prefixes = ("извините", "я извиняюсь", "вопрос не ясен", "я")
     if response.lower().startswith(prefixes):
-        print(colored(f"Возникла проблема: {response}", config['error_message_color']))
+        console.print(Panel(f"[bold yellow]Возникла проблема:[/bold yellow] {response}", title="Предупреждение", border_style="yellow"))
         sys.exit(-1)
 
-def check_for_markdown(response, config):
+def check_for_markdown(response):
     if response.count("```", 2):
-        print(colored("Предложенная команда содержит разметку, поэтому я не выполнил ответ напрямую:", config['error_message_color']))
-        print(response)
+        console.print(Panel("[bold yellow]Предложенная команда содержит разметку, поэтому я не выполнил ответ напрямую:[/bold yellow]", title="Предупреждение", border_style="yellow"))
+        syntax = Syntax(response, "markdown", theme="monokai", line_numbers=True)
+        console.print(syntax)
         sys.exit(-1)
 
 def prompt_user_for_action(config, ask_flag, response):
-    print(colored("Команда: ", config['user_message_color']) + colored(response, config['suggested_command_color'], attrs=['bold']))
+    console.print(Panel(f"[bold cyan]Команда:[/bold cyan] {response}", title="Предложенная команда", border_style="cyan"))
     
     modify_snippet = " [и]зменить" if config['modify'] else ""
     copy_to_clipboard_snippet = " [к]опировать в буфер обмена"
     create_script_snippet = " [с]крипт"
 
     if config['safety'] or ask_flag:
-        prompt_text = f"Выполнить команду? [Д]а [н]ет{modify_snippet}{copy_to_clipboard_snippet}{create_script_snippet} ==> "
-        return input(colored(prompt_text, config['user_message_color']))
+        prompt_text = f"[bold]Выполнить команду?[/bold] [green][Д]а[/green] [red][н]ет[/red]{modify_snippet}{copy_to_clipboard_snippet}{create_script_snippet} ==> "
+        return console.input(prompt_text)
     
     return "Д"
 
 def create_script(config, query, shell):
     script_query = f"Создайте скрипт для {query}. Скрипт должен обрабатывать ошибки, предоставлять четкий вывод и работать надежно."
     script_content = chat_completion(config, script_query, shell, is_script=True)
-    script_name = input(colored("Введите имя скрипта (без расширения): ", config['user_message_color']))
+    script_name = console.input("[bold cyan]Введите имя скрипта (без расширения):[/bold cyan] ")
     
     if platform.system() == "Windows":
         script_extension = ".ps1"
@@ -185,90 +229,105 @@ def create_script(config, query, shell):
     if platform.system() != "Windows":
         os.chmod(script_path, 0o755)  # Делаем скрипт исполняемым на Unix-подобных системах
     
-    print(colored(f"Скрипт создан: {script_path}", config['assistant_message_color']))
-    print(colored(f"Для запуска скрипта используйте: {run_command}", config['assistant_message_color']))
+    console.print(Panel(f"[bold green]Скрипт создан:[/bold green] {script_path}", title="Успех", border_style="green"))
+    console.print(f"[bold cyan]Для запуска скрипта используйте:[/bold cyan] {run_command}")
     return script_path, run_command
 
 def eval_user_intent_and_execute(config, user_input, command, shell, ask_flag, query):
     if user_input.upper() not in ["", "Д", "К", "И", "С"]:
-        print(colored("Действие не выполнено.", config['assistant_message_color']))
+        console.print("[bold yellow]Действие не выполнено.[/bold yellow]")
         return
     
     if user_input.upper() in ["Д", ""]:
         try:
-            if platform.system() == "Windows":
-                result = subprocess.run(["powershell", "-Command", command], shell=True, check=True, capture_output=True, text=True)
-            else:
-                result = subprocess.run(["bash", "-c", command], shell=False, check=True, capture_output=True, text=True)
-            print(result.stdout)
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Выполнение команды...", total=100)
+                if platform.system() == "Windows":
+                    result = subprocess.run(["powershell", "-Command", command], shell=True, check=True, capture_output=True, text=True)
+                else:
+                    result = subprocess.run(["bash", "-c", command], shell=False, check=True, capture_output=True, text=True)
+                progress.update(task, completed=100)
+            console.print(Panel(result.stdout, title="Результат выполнения", border_style="green"))
             if result.stderr:
-                print(colored(f"Ошибки или предупреждения:\n{result.stderr}", config['error_message_color']))
+                console.print(Panel(result.stderr, title="Ошибки или предупреждения", border_style="yellow"))
         except subprocess.CalledProcessError as e:
-            print(colored(f"Ошибка выполнения команды: {e}", config['error_message_color']))
+            console.print(Panel(f"[bold red]Ошибка выполнения команды:[/bold red] {e}", title="Ошибка", border_style="red"))
             if e.output:
-                print(colored(f"Вывод:\n{e.output}", config['error_message_color']))
+                console.print(Panel(e.output, title="Вывод", border_style="yellow"))
             if e.stderr:
-                print(colored(f"Вывод ошибки:\n{e.stderr}", config['error_message_color']))
+                console.print(Panel(e.stderr, title="Вывод ошибки", border_style="red"))
     
     if config['modify'] and user_input.upper() == "И":
-        modded_query = input(colored("Измените запрос: ", config['user_message_color']))
+        modded_query = console.input("[bold cyan]Измените запрос:[/bold cyan] ")
         modded_response = chat_completion(config, modded_query, shell)
-        check_for_issue(modded_response, config)
-        check_for_markdown(modded_response, config)
+        check_for_issue(modded_response)
+        check_for_markdown(modded_response)
         user_intent = prompt_user_for_action(config, ask_flag, modded_response)
-        print()
+        console.print()
         eval_user_intent_and_execute(config, user_intent, modded_response, shell, ask_flag, modded_query)
     
     if user_input.upper() == "К":
         try:
+            import pyperclip
             pyperclip.copy(command)
-            print(colored("Команда скопирована в буфер обмена.", config['assistant_message_color']))
+            console.print("[bold green]Команда скопирована в буфер обмена.[/bold green]")
+        except ImportError:
+            console.print("[bold red]Не удалось импортировать модуль pyperclip. Убедитесь, что он установлен.[/bold red]")
         except pyperclip.PyperclipException:
-            print(colored("Не удалось скопировать в буфер обмена. Убедитесь, что у вас установлены необходимые зависимости.", config['error_message_color']))
+            console.print("[bold red]Не удалось скопировать в буфер обмена. Убедитесь, что у вас установлены необходимые зависимости.[/bold red]")
     
     if user_input.upper() == "С":
         script_path, run_command = create_script(config, query, shell)
-        print(colored(f"Для запуска скрипта используйте: {run_command}", config['assistant_message_color']))
+        console.print(f"[bold cyan]Для запуска скрипта используйте:[/bold cyan] {run_command}")
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="CLI tool for interacting with OpenRouter API.")
+    parser.add_argument("-a", "--ask", help="Запрашивать подтверждение перед выполнением команды", action="store_true")
+    parser.add_argument("-k", "--key", help="Изменить API ключ OpenRouter", action="store_true")
+    parser.add_argument("query", nargs="*", help="Ваш вопрос или команда")
+    
+    return parser.parse_args()
 
 def main():
-    init()  # Включаем цветной вывод на Windows с помощью colorama
+    reset_console()  # Сброс настроек консоли в начале выполнения
 
     config = read_config()
-    
     shell = "bash" if platform.system() != "Windows" else "powershell"
 
-    command_start_idx = 1
-    ask_flag = False
-    change_key_flag = False
+    args = parse_arguments()
+    ask_flag = args.ask
+    change_key_flag = args.key
+    user_prompt = " ".join(args.query)
 
-    if len(sys.argv) < 2:
+    if change_key_flag:
+        console.print(Panel("[bold cyan]Изменение API ключа OpenRouter[/bold cyan]", border_style="cyan"))
+        new_api_key = get_api_key()
+        update_env_file(new_api_key)
+        console.print("[bold green]API ключ успешно обновлен.[/bold green]")
+        sys.exit(0)
+
+    if not user_prompt:
         print_usage(config)
         sys.exit(-1)
 
-    if "-a" in sys.argv:
-        ask_flag = True
-        sys.argv.remove("-a")
+    try:
+        user_prompt = ensure_prompt_is_question(user_prompt)
+    except ValueError as e:
+        console.print(Panel(f"[bold red]{str(e)}[/bold red]", title="Ошибка", border_style="red"))
+        sys.exit(-1)
 
-    if "-k" in sys.argv:
-        change_key_flag = True
-        sys.argv.remove("-k")
-
-    if change_key_flag:
-        print(colored("Изменение API ключа OpenRouter", 'yellow'))
-        new_api_key = get_api_key()
-        update_env_file(new_api_key)
-        print(colored("API ключ успешно обновлен.", 'green'))
-        sys.exit(0)
-
-    user_prompt = " ".join(sys.argv[command_start_idx:])
-
-    result = chat_completion(config, user_prompt, shell) 
-    check_for_issue(result, config)
-    check_for_markdown(result, config)
+    result = chat_completion(config, user_prompt, shell)
+    check_for_issue(result)
+    check_for_markdown(result)
 
     users_intent = prompt_user_for_action(config, ask_flag, result)
-    print()
+    console.print()
     eval_user_intent_and_execute(config, users_intent, result, shell, ask_flag, user_prompt)
+
+    reset_console()  # Сброс настроек консоли в конце выполнения
+
+    if IS_CMD:
+        console.print("\n" * 2)  # Добавляем две пустые строки в конце для CMD
 
 if __name__ == "__main__":
     main()
