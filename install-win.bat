@@ -1,104 +1,139 @@
 @echo off
-chcp 65001 > nul
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-echo ===== Установка IOP для Windows =====
-
-REM Проверка наличия необходимых файлов
-if not exist "iop.py" (
-    echo Ошибка: Файл iop.py не найден в текущей директории.
-    echo Убедитесь, что вы запускаете этот скрипт из правильной директории.
-    pause
-    exit /b 1
+:: Запрос прав администратора
+NET SESSION >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Запуск от имени администратора...
+    powershell -Command "Start-Process '%~dpnx0' -Verb RunAs"
+    exit /b
 )
 
-REM Проверка наличия Python
-python --version >nul 2>&1
+:: Проверка наличия Python
+where python >nul 2>nul
 if %errorlevel% neq 0 (
-    echo Python не найден. Проверяем альтернативные пути...
-    
-    REM Проверка стандартных путей установки Python
-    set "python_paths=C:\Python39;C:\Python38;C:\Python37;%LOCALAPPDATA%\Programs\Python\Python39;%LOCALAPPDATA%\Programs\Python\Python38;%LOCALAPPDATA%\Programs\Python\Python37"
-    
-    for %%p in (%python_paths%) do (
-        if exist "%%p\python.exe" (
-            set "PYTHON_PATH=%%p"
+    echo Python не найден в PATH. Попытка автоматического обнаружения...
+    for /d %%i in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+        if exist "%%i\python.exe" (
+            set "PYTHON_PATH=%%i"
             goto :python_found
         )
     )
-    
-    echo Python не найден в стандартных местах установки.
-    goto :python_not_found
-) else (
-    for /f "tokens=*" %%i in ('python --version 2^>^&1') do set python_version=%%i
-    echo Найдена версия Python: !python_version!
-    set "PYTHON_PATH=python"
-    goto :python_found
+    echo Python не найден. Пожалуйста, установите Python и добавьте его в PATH.
+    echo Вы можете скачать Python с https://www.python.org/downloads/
+    echo При установке убедитесь, что отмечена опция "Add Python to PATH"
+    pause
+    exit /b 1
 )
-
-:python_not_found
-echo.
-echo Не удалось найти подходящую версию Python (3.7 или выше).
-echo Если Python установлен, убедитесь, что он добавлен в системный PATH.
-echo.
-echo Чтобы добавить Python в PATH:
-echo 1. Откройте "Параметры системы"
-echo 2. Перейдите в "Дополнительные параметры системы"
-echo 3. Нажмите "Переменные среды"
-echo 4. В разделе "Системные переменные" найдите и выберите "Path"
-echo 5. Нажмите "Изменить" и добавьте путь к директории Python и Python\Scripts
-echo.
-echo Если Python не установлен, скачайте его с https://www.python.org/downloads/
-echo После установки Python или обновления PATH, запустите этот скрипт снова.
-pause
-exit /b 1
 
 :python_found
-echo Python успешно обнаружен.
-
-REM Создание виртуального окружения
-echo Создание виртуального окружения...
-%PYTHON_PATH% -m venv iop-env
-if %errorlevel% neq 0 (
-    echo Не удалось создать виртуальное окружение. Проверьте права доступа и попробуйте снова.
-    pause
-    exit /b 1
-)
-
-REM Активация виртуального окружения
-echo Активация виртуального окружения...
-call iop-env\Scripts\activate.bat
-
-REM Установка зависимостей
-echo Установка зависимостей...
-python -m pip install --upgrade pip
-pip install requests pyyaml python-dotenv termcolor colorama pyperclip
-if %errorlevel% neq 0 (
-    echo Не удалось установить зависимости. Проверьте подключение к интернету и попробуйте снова.
-    pause
-    exit /b 1
-)
-
-REM Создание bat-файла для запуска IOP
-echo @echo off > iop.bat
-echo chcp 65001 ^> nul >> iop.bat
-echo call "%cd%\iop-env\Scripts\activate.bat" >> iop.bat
-echo python "%cd%\iop.py" %%* >> iop.bat
-echo deactivate >> iop.bat
-
-REM Добавление пути к iop.bat в PATH
-set "folder_path=%cd%"
-set "path_to_add=!folder_path!"
-setx PATH "%PATH%;!path_to_add!"
-if %errorlevel% neq 0 (
-    echo Не удалось добавить путь в PATH. Вы можете сделать это вручную, добавив следующий путь в переменную среды PATH:
-    echo !path_to_add!
+if defined PYTHON_PATH (
+    echo Python найден: !PYTHON_PATH!
+    echo Добавление Python в PATH...
+    setx PATH "%PATH%;!PYTHON_PATH!;!PYTHON_PATH!\Scripts" /M
+    set "PATH=%PATH%;!PYTHON_PATH!;!PYTHON_PATH!\Scripts"
 ) else (
-    echo Путь успешно добавлен в PATH.
+    echo Python уже находится в PATH.
+)
+
+:: Проверка версии Python
+for /f "tokens=2" %%I in ('python --version 2^>^&1') do set PYTHON_VERSION=%%I
+echo Обнаружена версия Python: %PYTHON_VERSION%
+
+:: Проверка наличия необходимых файлов
+if not exist "%~dp0iop.py" ( echo iop.py отсутствует в %~dp0, установка невозможна & goto :end )
+if not exist "%~dp0prompt.txt" ( echo prompt.txt отсутствует в %~dp0, установка невозможна & goto :end )
+if not exist "%~dp0config.yaml" ( echo config.yaml отсутствует в %~dp0, установка невозможна & goto :end )
+if not exist "%~dp0ai_model.py" ( echo ai_model.py отсутствует в %~dp0, установка невозможна & goto :end )
+
+:: Установка значений по умолчанию
+set "INSTALL_DIR=%USERPROFILE%\iop-cli"
+
+:menu
+cls
+echo Установщик IOP
+echo ---------------
+echo [1] Установка по умолчанию (в %USERPROFILE%\iop-cli)
+echo [2] Выбрать другую директорию для установки
+echo [3] Выход
+choice /C 123 /N /M "Выберите опцию (1-3): "
+if errorlevel 3 goto :end
+if errorlevel 2 goto :custom_install
+if errorlevel 1 goto :install
+
+:custom_install
+cls
+echo Пользовательская установка
+echo ---------------------------
+set /p INSTALL_DIR="Введите путь для установки IOP (по умолчанию %USERPROFILE%\iop-cli): "
+if "!INSTALL_DIR!"=="" set "INSTALL_DIR=%USERPROFILE%\iop-cli"
+
+:install
+if not exist "!INSTALL_DIR!" mkdir "!INSTALL_DIR!"
+
+echo Копирование файлов...
+copy "%~dp0iop.py" "!INSTALL_DIR!"
+copy "%~dp0prompt.txt" "!INSTALL_DIR!"
+copy "%~dp0config.yaml" "!INSTALL_DIR!"
+copy "%~dp0ai_model.py" "!INSTALL_DIR!"
+
+echo Создание виртуального окружения...
+python -m venv "!INSTALL_DIR!\iop-env"
+if %errorlevel% neq 0 (
+    echo Ошибка при создании виртуального окружения.
+    goto :end
+)
+
+echo Создание iop.bat...
+(
+echo @echo off
+echo chcp 65001 ^>nul
+echo call "!INSTALL_DIR!\iop-env\Scripts\activate.bat"
+echo python "!INSTALL_DIR!\iop.py" %%*
+echo call "!INSTALL_DIR!\iop-env\Scripts\deactivate.bat"
+) > "!INSTALL_DIR!\iop.bat"
+
+echo Установка зависимостей...
+call "!INSTALL_DIR!\iop-env\Scripts\activate.bat"
+python -m pip install --upgrade pip
+pip install PyYAML==6.0.1 requests==2.26.0 python-dotenv==0.19.1 pyperclip termcolor==1.1.0 colorama==0.4.4 distro==1.6.0
+if %errorlevel% neq 0 (
+    echo Ошибка при установке зависимостей.
+    goto :end
+)
+
+:: Добавление директории в PATH
+echo Добавление директории в PATH...
+set "PATH_TO_ADD=!INSTALL_DIR!"
+setx PATH "%PATH%;%PATH_TO_ADD%" /M
+if %errorlevel% neq 0 (
+    echo Не удалось добавить директорию в PATH. Пожалуйста, добавьте !INSTALL_DIR! в PATH вручную.
+) else (
+    echo Директория успешно добавлена в PATH.
+    :: Обновление PATH для текущей сессии
+    set "PATH=%PATH%;%PATH_TO_ADD%"
+)
+
+:: Создание символической ссылки для глобального доступа
+echo Создание символической ссылки для глобального доступа...
+if exist "%SystemRoot%\iop.bat" (
+    echo Символическая ссылка уже существует.
+) else (
+    mklink "%SystemRoot%\iop.bat" "!INSTALL_DIR!\iop.bat"
+    if %errorlevel% neq 0 (
+        echo Не удалось создать символическую ссылку. Убедитесь, что вы запустили скрипт от имени администратора.
+    ) else (
+        echo Символическая ссылка успешно создана.
+    )
 )
 
 echo.
-echo Установка завершена успешно!
-echo Теперь вы можете использовать команду 'iop [запрос]' в любом месте системы.
-echo Если команда 'iop' не работает, перезапустите командную строку или компьютер.
+echo Установка завершена!
+echo IOP установлен в: !INSTALL_DIR!
+echo.
+echo Теперь вы можете использовать команду 'iop [ваш запрос]' из любого места в системе.
+echo Если команда не работает, попробуйте перезапустить командную строку или PowerShell.
+
+:end
 pause
