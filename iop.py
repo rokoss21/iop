@@ -14,6 +14,8 @@ from rich.table import Table
 from rich.progress import Progress
 from rich.syntax import Syntax
 
+VERSION = "1.01"
+
 # Инициализация Rich Console
 console = Console()
 
@@ -174,11 +176,15 @@ def chat_completion(config, query, shell, is_script=False):
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
-                json=data
+                json=data,
+                timeout=30
             )
             progress.update(task, completed=100)
         response.raise_for_status()
         return response.json()['choices'][0]['message']['content']
+    except requests.exceptions.Timeout:
+        console.print(Panel("[bold red]Превышено время ожидания ответа от API[/bold red]", title="Ошибка", border_style="red"))
+        sys.exit(-1)
     except requests.exceptions.RequestException as e:
         console.print(Panel(f"[bold red]Ошибка при выполнении запроса:[/bold red] {e}", title="Ошибка", border_style="red"))
         sys.exit(-1)
@@ -190,7 +196,8 @@ def check_for_issue(response):
         sys.exit(-1)
 
 def check_for_markdown(response):
-    if response.count("```", 2):
+    # Consider code fences as a sign that the model returned formatted text
+    if response.count("```") >= 2:
         console.print(Panel("[bold yellow]Предложенная команда содержит разметку, поэтому я не выполнил ответ напрямую:[/bold yellow]", title="Предупреждение", border_style="yellow"))
         syntax = Syntax(response, "markdown", theme="monokai", line_numbers=True)
         console.print(syntax)
@@ -284,6 +291,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="CLI tool for interacting with OpenRouter API.")
     parser.add_argument("-a", "--ask", help="Запрашивать подтверждение перед выполнением команды", action="store_true")
     parser.add_argument("-k", "--key", help="Изменить API ключ OpenRouter", action="store_true")
+    parser.add_argument("-v", "--version", help="Показать версию программы", action="store_true")
     parser.add_argument("query", nargs="*", help="Ваш вопрос или команда")
     
     return parser.parse_args()
@@ -297,6 +305,9 @@ def main():
     args = parse_arguments()
     ask_flag = args.ask
     change_key_flag = args.key
+    if args.version:
+        console.print(f"IOP CLI version {VERSION}")
+        sys.exit(0)
     user_prompt = " ".join(args.query)
 
     if change_key_flag:
