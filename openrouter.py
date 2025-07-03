@@ -11,6 +11,7 @@ from rich.progress import Progress
 import utils
 import prompt
 from pathlib import Path
+import cache
 try:
     from cryptography.fernet import Fernet, InvalidToken  # type: ignore
 except ModuleNotFoundError:  # fallback if cryptography not installed yet
@@ -136,7 +137,27 @@ def read_config() -> Dict[str, Any]:
 # Chat completion
 # ----------------------------------------------------------------------------
 
-def chat_completion(config: Dict[str, Any], query: str, shell: str, *, is_script: bool = False) -> str:
+def _request_payload(config: Dict[str, Any], system_prompt: str, query: str, stream: bool) -> Dict[str, Any]:
+    return {
+        "model": config["model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query},
+        ],
+        "temperature": config["temperature"],
+        "max_tokens": config["max_tokens"],
+        "stream": stream,
+    }
+
+
+def chat_completion(
+    config: Dict[str, Any],
+    query: str,
+    shell: str,
+    *,
+    is_script: bool = False,
+    stream: bool = False,
+) -> str:
     """Send a chat completion request to OpenRouter and return the assistant's reply."""
     if not query:
         utils.console.print(Panel("[bold red]Не указан запрос пользователя.[/bold red]", title="Ошибка", border_style="red"))
@@ -149,15 +170,13 @@ def chat_completion(config: Dict[str, Any], query: str, shell: str, *, is_script
         "X-Title": config["your_app_name"],
     }
 
-    data = {
-        "model": config["model"],
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
-        ],
-        "temperature": config["temperature"],
-        "max_tokens": config["max_tokens"],
-    }
+    # Check cache first (only when not script)
+    if not is_script:
+        cached = cache.get_cached_response(config["model"], query)
+        if cached is not None:
+            return cached
+
+    data = _request_payload(config, system_prompt, query, stream)
 
     try:
         with Progress() as progress:
@@ -170,7 +189,31 @@ def chat_completion(config: Dict[str, Any], query: str, shell: str, *, is_script
             )
             progress.update(task, completed=100)
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        if stream:
+            content_parts: list[str] = []
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                if line.startswith(b"data: "):
+                    data_str = line[len(b"data: ") :].decode("utf-8")
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk_json = yaml.safe_load(data_str)
+                        delta = chunk_json["choices"][0]["delta"].get("content", "")
+                        yield delta  # type: ignore[misc]
+                        content_parts.append(delta)
+                    except Exception:
+                        continue
+            full_content = "".join(content_parts)
+        else:
+            full_content = response.json()["choices"][0]["message"]["content"]
+
+        # Cache full content if eligible
+        if not is_script:
+            cache.store_response(config["model"], query, full_content)
+
+        return full_content
     except requests.exceptions.Timeout:
         utils.console.print(Panel("[bold red]Превышено время ожидания ответа от API[/bold red]", title="Ошибка", border_style="red"))
         raise SystemExit(-1)
