@@ -1,8 +1,7 @@
 import os
 import platform
 import subprocess
-import sys
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from rich.panel import Panel
 from rich.progress import Progress
@@ -16,14 +15,14 @@ import openrouter
 # Response checks
 # ----------------------------------------------------------------------------
 
-def check_for_issue(response: str):
+def check_for_issue(response: str) -> None:
     prefixes = ("извините", "я извиняюсь", "вопрос не ясен", "я")
     if response.lower().startswith(prefixes):
         utils.console.print(Panel(f"[bold yellow]Возникла проблема:[/bold yellow] {response}", title="Предупреждение", border_style="yellow"))
         raise SystemExit(-1)
 
 
-def check_for_markdown(response: str):
+def check_for_markdown(response: str) -> None:
     # Consider code fences as a sign that the model returned formatted text
     if response.count("```") >= 2:
         utils.console.print(Panel("[bold yellow]Предложенная команда содержит разметку, поэтому я не выполнил ответ напрямую:[/bold yellow]", title="Предупреждение", border_style="yellow"))
@@ -56,7 +55,7 @@ def prompt_user_for_action(config: Dict[str, Any], ask_flag: bool, response: str
 # Script creation
 # ----------------------------------------------------------------------------
 
-def create_script(config: Dict[str, Any], query: str, shell: str):
+def create_script(config: Dict[str, Any], query: str, shell: str) -> Tuple[str, str]:
     script_query = (
         f"Создайте скрипт для {query}. Скрипт должен обрабатывать ошибки, предоставлять четкий вывод и работать надежно."
     )
@@ -94,7 +93,7 @@ def eval_user_intent_and_execute(
     shell: str,
     ask_flag: bool,
     query: str,
-):
+) -> None:
     if user_input.upper() not in ["", "Д", "К", "И", "С"]:
         utils.console.print("[bold yellow]Действие не выполнено.[/bold yellow]")
         return

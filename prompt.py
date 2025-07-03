@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Any, Dict
 
 from rich.panel import Panel
 from rich.table import Table
@@ -50,7 +50,7 @@ def ensure_prompt_is_question(prompt: str) -> str:
     return prompt
 
 
-def print_usage(config):
+def print_usage(config: Dict[str, Any]) -> None:
     """Pretty usage message leveraging Rich tables and panels."""
     utils.console.print(Panel("[bold cyan]Разработчик @rokoss21, версия 1.0[/bold cyan]", border_style="cyan"))
     utils.console.print()

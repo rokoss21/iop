@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools >= 61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iop-cli"
+version = "1.1.0"
+description = "Intelligent Operations CLI using OpenRouter AI"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+  { name = "rokoss21" }
+]
+requires-python = ">=3.8"
+
+# Runtime dependencies
+dependencies = [
+  "requests>=2.26",
+  "python-dotenv>=0.19",
+  "PyYAML>=6.0",
+  "pyperclip>=1.8",
+  "termcolor>=1.1",
+  "colorama>=0.4",
+  "distro>=1.6",
+  "rich>=13.0",
+]
+
+[project.scripts]
+iop = "cli:main"
+
+[tool.black]
+line-length = 120
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+exclude = ["build", "dist", ".venv"]
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+ignore_missing_imports = true
+
+[tool.pylint.MESSAGES CONTROL]
+disable = ["C0114", "C0115", "C0116"]

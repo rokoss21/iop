@@ -1,6 +1,5 @@
 import platform
 import sys
-from typing import List
 
 import utils
 import openrouter

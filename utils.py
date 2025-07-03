@@ -2,6 +2,7 @@ import os
 import platform
 import logging
 from rich.console import Console
+from typing import Any
 
 # Initialize Rich Console globally so other modules can reuse it
 console = Console()
@@ -13,14 +14,14 @@ IS_CMD = os.environ.get("TERM") == "xterm" or "cmd" in os.environ.get("COMSPEC",
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def safe_print(*args, **kwargs):
+def safe_print(*args: Any, **kwargs: Any) -> None:
     """Wrapper around Console.print that adds an extra newline for cmd.exe."""
     console.print(*args, **kwargs)
     if IS_CMD:
         console.print()  # Extra empty line for CMD
 
 
-def reset_console():
+def reset_console() -> None:
     """Reset terminal colours for the current platform."""
     if platform.system() == "Windows":
         os.system("color")
