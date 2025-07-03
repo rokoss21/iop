@@ -2,8 +2,10 @@ import os
 import sys
 import unittest
 from unittest import mock
+from pathlib import Path
 
 import iop
+import utils
 
 class TestEnsurePromptIsQuestion(unittest.TestCase):
     def test_appends_question_mark(self):
@@ -33,13 +35,15 @@ class TestParseArguments(unittest.TestCase):
 
 class TestReadConfig(unittest.TestCase):
     def setUp(self):
-        self.root_dir = os.path.dirname(os.path.abspath(iop.__file__))
-        self.env_path = os.path.join(self.root_dir, '.env')
-        with open(self.env_path, 'w') as f:
-            f.write('OPENROUTER_API_KEY=testkey')
+        cfg_dir = utils.get_config_dir()
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        self.cfg_path = cfg_dir / 'config.yaml'
+        with open(self.cfg_path, 'w') as f:
+            f.write('openrouter_api_key: testkey\nencrypted: false\n')
 
     def tearDown(self):
-        os.remove(self.env_path)
+        if self.cfg_path.exists():
+            self.cfg_path.unlink()
 
     def test_env_loaded(self):
         config = iop.read_config()

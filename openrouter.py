@@ -1,4 +1,6 @@
 import os
+import base64
+import getpass
 import requests
 import yaml
 from typing import Any, Dict
@@ -8,6 +10,14 @@ from rich.progress import Progress
 
 import utils
 import prompt
+from pathlib import Path
+try:
+    from cryptography.fernet import Fernet, InvalidToken  # type: ignore
+except ModuleNotFoundError:  # fallback if cryptography not installed yet
+    Fernet = None  # type: ignore
+    class _DummyInvalidToken(Exception):
+        pass
+    InvalidToken = _DummyInvalidToken  # type: ignore
 
 
 VERSION = "1.01"  # keep version accessible for other modules
@@ -40,50 +50,84 @@ def get_api_key() -> str:
         utils.console.print("[bold yellow]Неверный API ключ. Пожалуйста, попробуйте снова.[/bold yellow]")
 
 
-def _env_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+def _user_config_path() -> Path:
+    """Return path to user-specific config file (~/.config/iop/config.yaml on Linux)."""
+    cfg_dir = utils.get_config_dir()
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    return cfg_dir / "config.yaml"
 
 
-def update_env_file(api_key: str) -> None:
-    """Write or update the local .env with the provided API key."""
-    env_path = _env_path()
-    if not os.path.exists(env_path):
-        with open(env_path, "w") as env_file:
-            env_file.write(f"OPENROUTER_API_KEY={api_key}")
-        os.chmod(env_path, 0o600)
-        return
+def _encrypt_api_key(api_key: str, password: str) -> str:
+    if Fernet is None:
+        utils.console.print("[bold red]Библиотека cryptography не установлена, шифрование недоступно.[/bold red]", markup=True)
+        return api_key  # fallback to plain text
+    key = base64.urlsafe_b64encode(password.encode("utf-8").ljust(32, b"0")[:32])
+    fernet = Fernet(key)
+    return fernet.encrypt(api_key.encode("utf-8")).decode("utf-8")
 
-    utils.console.print("[bold yellow]Файл .env уже существует. Перезаписать?[/bold yellow]")
-    if utils.console.input("[bold cyan]Введите Y для перезаписи:[/bold cyan] ").strip().lower() == "y":
-        with open(env_path, "w") as env_file:
-            env_file.write(f"OPENROUTER_API_KEY={api_key}")
-        os.chmod(env_path, 0o600)
+
+def _decrypt_api_key(token: str, password: str) -> str:
+    if Fernet is None:
+        return token  # assume plain
+    key = base64.urlsafe_b64encode(password.encode("utf-8").ljust(32, b"0")[:32])
+    fernet = Fernet(key)
+    return fernet.decrypt(token.encode("utf-8")).decode("utf-8")
+
+
+def _write_user_config(content: Dict[str, Any]) -> None:
+    path = _user_config_path()
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(content, fh)
+    os.chmod(path, 0o600)
+
+
+def update_user_config_api_key(api_key: str) -> None:
+    """Write or update the user config YAML with (optionally encrypted) API key."""
+    encrypt_choice = utils.console.input("[bold cyan]Защитить ключ паролем? (Y/N):[/bold cyan] ").strip().lower()
+    config_data: Dict[str, Any] = {}
+    if encrypt_choice == "y":
+        password = getpass.getpass("Введите пароль для шифрования ключа: ")
+        enc_key = _encrypt_api_key(api_key, password)
+        config_data = {"openrouter_api_key": enc_key, "encrypted": True}
+    else:
+        config_data = {"openrouter_api_key": api_key, "encrypted": False}
+
+    _write_user_config(config_data)
 
 
 def read_config() -> Dict[str, Any]:
-    """Load YAML config and resolve env placeholders; ensure API key exists."""
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
-    with open(config_file, "r", encoding="utf-8") as file:
+    """Load default config and merge with user config, ensuring API key available."""
+    # Repo default config
+    repo_config_file = Path(__file__).with_name("config.yaml")
+    with open(repo_config_file, "r", encoding="utf-8") as file:
         config: Dict[str, Any] = yaml.safe_load(file)
 
-    # Resolve env key from .env
-    env_path = _env_path()
-    if not os.path.exists(env_path):
-        utils.console.print(Panel("[bold yellow]Файл .env не найден. Пожалуйста, введите API ключ OpenRouter.[/bold yellow]", title="Внимание", border_style="yellow"))
-        api_key = get_api_key()
-        update_env_file(api_key)
+    # User-specific overrides
+    user_cfg_path = _user_config_path()
+    if user_cfg_path.exists():
+        with open(user_cfg_path, "r", encoding="utf-8") as fh:
+            user_cfg: Dict[str, Any] = yaml.safe_load(fh) or {}
+        encrypted = user_cfg.get("encrypted", False)
+        if encrypted:
+            password = getpass.getpass("Введите пароль для расшифровки API ключа: ")
+            try:
+                key_plain = _decrypt_api_key(user_cfg["openrouter_api_key"], password)
+            except (InvalidToken, KeyError):
+                utils.console.print(Panel("[bold red]Неверный пароль расшифровки или повреждённый ключ.[/bold red]", title="Ошибка", border_style="red"))
+                raise SystemExit(-1)
+            config["openrouter_api_key"] = key_plain
+        else:
+            config["openrouter_api_key"] = user_cfg.get("openrouter_api_key")
     else:
-        import dotenv  # type: ignore
-
-        dotenv.load_dotenv(env_path)
-
-    config["openrouter_api_key"] = os.getenv("OPENROUTER_API_KEY")
-
-    if not config["openrouter_api_key"]:
-        utils.console.print(Panel("[bold yellow]API ключ OpenRouter не найден. Пожалуйста, введите его.[/bold yellow]", title="Внимание", border_style="yellow"))
+        utils.console.print(Panel("[bold yellow]Файл конфигурации не найден. Пожалуйста, введите API ключ OpenRouter.[/bold yellow]", title="Внимание", border_style="yellow"))
         api_key = get_api_key()
-        update_env_file(api_key)
+        update_user_config_api_key(api_key)
         config["openrouter_api_key"] = api_key
+
+    # Fallback final check
+    if not config.get("openrouter_api_key"):
+        utils.console.print(Panel("[bold red]API ключ OpenRouter не установлен.[/bold red]", title="Ошибка", border_style="red"))
+        raise SystemExit(-1)
 
     return config
 

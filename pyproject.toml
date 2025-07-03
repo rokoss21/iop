@@ -23,6 +23,7 @@ dependencies = [
   "colorama>=0.4",
   "distro>=1.6",
   "rich>=13.0",
+  "cryptography>=42.0",
 ]
 
 [project.scripts]

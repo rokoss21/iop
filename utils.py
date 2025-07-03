@@ -3,6 +3,7 @@ import platform
 import logging
 from rich.console import Console
 from typing import Any
+from pathlib import Path
 
 # Initialize Rich Console globally so other modules can reuse it
 console = Console()
@@ -45,3 +46,28 @@ def get_os_friendly_name() -> str:
         return "Darwin/macOS"
     else:
         return os_name
+
+
+# ---------------------------------------------------------------------------
+# Configuration directories
+# ---------------------------------------------------------------------------
+
+
+def get_config_dir() -> Path:
+    """Return user-specific configuration directory path for IOP CLI.
+
+    Linux   : $XDG_CONFIG_HOME/iop   or ~/.config/iop
+    Windows : %APPDATA%\iop
+    macOS   : ~/Library/Application Support/iop
+    """
+    system = platform.system()
+    if system == "Windows":
+        appdata = os.getenv("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / "iop"
+    elif system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "iop"
+    else:  # assume POSIX
+        xdg = os.getenv("XDG_CONFIG_HOME")
+        if xdg:
+            return Path(xdg) / "iop"
+        return Path.home() / ".config" / "iop"

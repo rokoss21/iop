@@ -1,6 +1,7 @@
 import os
 import platform
 import subprocess
+import re
 from typing import Any, Dict, Tuple
 
 from rich.panel import Panel
@@ -83,6 +84,28 @@ def create_script(config: Dict[str, Any], query: str, shell: str) -> Tuple[str, 
 
 
 # ----------------------------------------------------------------------------
+# Dangerous command detection
+# ----------------------------------------------------------------------------
+
+_DANGEROUS_PATTERNS = [
+    r"rm\s+-rf\s+/",  # remove root
+    r"rm\s+-rf\s+\$\{?HOME",  # remove home dir
+    r"dd\s+if=",  # raw disk writes
+    r":\(\)\s*\{\s*:\|:\s*&\s*;\s*:\}\s*;",  # fork bomb
+    r"mkfs\.",  # disk format utilities
+    r"shutdown\s+-h",  # halt machine
+    r"poweroff",  # poweroff
+    r":>|/dev/sd",  # raw disk
+]
+
+def _is_dangerous(cmd: str) -> bool:
+    for pattern in _DANGEROUS_PATTERNS:
+        if re.search(pattern, cmd):
+            return True
+    return False
+
+
+# ----------------------------------------------------------------------------
 # Command execution pipeline
 # ----------------------------------------------------------------------------
 
@@ -99,6 +122,15 @@ def eval_user_intent_and_execute(
         return
 
     if user_input.upper() in ["Д", ""]:
+        if _is_dangerous(command):
+            utils.console.print(
+                Panel(
+                    "[bold red]Команда выглядит потенциально опасной и была заблокирована.[/bold red]",
+                    title="Безопасность",
+                    border_style="red",
+                )
+            )
+            return
         try:
             with Progress() as progress:
                 task = progress.add_task("[cyan]Выполнение команды...", total=100)

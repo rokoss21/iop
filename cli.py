@@ -43,7 +43,7 @@ def main() -> None:
     if args.key:
         utils.console.print("[bold cyan]Изменение API ключа OpenRouter[/bold cyan]", markup=True)
         new_api_key = openrouter.get_api_key()
-        openrouter.update_env_file(new_api_key)
+        openrouter.update_user_config_api_key(new_api_key)
         utils.console.print("[bold green]API ключ успешно обновлен.[/bold green]", markup=True)
         sys.exit(0)
 
